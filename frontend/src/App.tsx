@@ -21,6 +21,7 @@ import {
 import { Header } from "./components/Header";
 import { Sidebar } from "./components/Sidebar";
 import { GlobeScene } from "./scene/GlobeScene";
+import { GlobeErrorBoundary } from "./scene/GlobeErrorBoundary";
 import { Scene2DFallback } from "./components/Scene2DFallback";
 import { FlightHud } from "./components/FlightHud";
 import { KpiCardsSection } from "./components/KpiCard";
@@ -183,10 +184,14 @@ export const App: React.FC = () => {
             id="stage-3d"
             className="relative w-full h-[360px] sm:h-[420px] rounded-2xl overflow-hidden border border-slate-800 glass-panel shadow-2xl"
           >
-            {is2DMode || perfTier === "low" ? (
+            {is2DMode ? (
               <Scene2DFallback flightData={flightData} signal={signal} />
             ) : (
-              <GlobeScene flightData={flightData} signal={signal} />
+              <GlobeErrorBoundary
+                fallback={<Scene2DFallback flightData={flightData} signal={signal} />}
+              >
+                <GlobeScene flightData={flightData} signal={signal} />
+              </GlobeErrorBoundary>
             )}
             <FlightHud flightData={flightData} signal={signal} />
           </div>

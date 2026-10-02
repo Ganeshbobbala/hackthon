@@ -1,4 +1,4 @@
-import React, { useRef, useMemo } from "react";
+import React, { useRef, useMemo, useEffect } from "react";
 import { useFrame } from "@react-three/fiber";
 import * as THREE from "three";
 import { useAppStore, FlightPhase } from "../store/useAppStore";
@@ -12,63 +12,82 @@ interface AirplaneProps {
 export const Airplane: React.FC<AirplaneProps> = ({ waypoints, signal }) => {
   const groupRef = useRef<THREE.Group>(null);
   const trailRef = useRef<THREE.Points>(null);
+  const trailInitialized = useRef(false);
+  const lastSyncTime = useRef(0);
+
   const flightProgress = useAppStore((state) => state.flightProgress);
   const setFlightProgress = useAppStore((state) => state.setFlightProgress);
-  const flightPhase = useAppStore((state) => state.flightPhase);
   const setFlightPhase = useAppStore((state) => state.setFlightPhase);
   const reducedMotion = useAppStore((state) => state.reducedMotion);
 
-  // Pre-generate trail particle buffer
-  const trailCount = 40;
+  // Local progress ref to decouple 60FPS animation from global React state thrashing
+  const progressRef = useRef(flightProgress);
+
+  useEffect(() => {
+    progressRef.current = flightProgress;
+  }, [flightProgress]);
+
+  // Contrail particle buffer
+  const trailCount = 35;
   const trailPositions = useMemo(() => new Float32Array(trailCount * 3), [trailCount]);
 
   useFrame((state, delta) => {
     if (!groupRef.current || waypoints.length < 2) return;
 
-    if (!reducedMotion) {
-      // Advance flight progress along the 200 waypoints
-      let nextProgress = flightProgress + delta * 0.04;
+    const clampedDelta = Math.min(delta, 0.1); // Guard against tab-switch delta spikes
 
-      if (signal === "WAIT / PRICE HIGH" && nextProgress > 0.85) {
-        // Holding pattern at 85% progress
-        setFlightPhase("holding");
-      } else if (nextProgress >= 1.0) {
-        nextProgress = 0.0;
-        setFlightPhase("takeoff");
-      } else if (nextProgress < 0.15) {
-        setFlightPhase("climb");
-      } else if (nextProgress < 0.82) {
-        setFlightPhase("cruise");
-      } else if (nextProgress < 0.96) {
-        setFlightPhase("descent");
+    if (!reducedMotion) {
+      // Advance flight progress smoothly
+      progressRef.current += clampedDelta * 0.04;
+
+      let currentPhase: FlightPhase = "cruise";
+      if (signal === "WAIT / PRICE HIGH" && progressRef.current > 0.82) {
+        currentPhase = "holding";
+      } else if (progressRef.current >= 1.0) {
+        progressRef.current = 0.0;
+        currentPhase = "takeoff";
+      } else if (progressRef.current < 0.15) {
+        currentPhase = "climb";
+      } else if (progressRef.current < 0.82) {
+        currentPhase = "cruise";
+      } else if (progressRef.current < 0.96) {
+        currentPhase = "descent";
       } else {
-        setFlightPhase("landed");
+        currentPhase = "landed";
       }
 
-      setFlightProgress(nextProgress);
+      // Throttle Zustand updates to 8 Hz for HUD to prevent 60 FPS React re-render thrashing
+      const now = state.clock.elapsedTime;
+      if (now - lastSyncTime.current > 0.12) {
+        lastSyncTime.current = now;
+        setFlightProgress(progressRef.current);
+        setFlightPhase(currentPhase);
+      }
     }
 
-    // Determine position based on flightPhase
+    const currentProg = progressRef.current;
     let targetPos = new THREE.Vector3();
     let forwardVec = new THREE.Vector3(0, 0, -1);
     let bankRoll = 0;
     let pitchAngle = 0;
 
-    if (flightPhase === "holding") {
-      // Fly in a smooth racetrack holding pattern near destination
-      const lastWp = waypoints[waypoints.length - 20];
-      const holdingRadius = 1.8;
-      const angle = state.clock.elapsedTime * 0.8;
+    const isHolding = signal === "WAIT / PRICE HIGH" && currentProg > 0.82;
+
+    if (isHolding) {
+      // Fly in a smooth holding orbit near destination
+      const holdWp = waypoints[Math.max(0, waypoints.length - 15)];
+      const holdingRadius = 1.2;
+      const angle = state.clock.elapsedTime * 0.9;
       targetPos.set(
-        lastWp.lon * 0.15 + Math.cos(angle) * holdingRadius,
-        1.2 + Math.sin(angle * 2) * 0.08,
-        -lastWp.lat * 0.15 + Math.sin(angle) * (holdingRadius * 0.7)
+        holdWp.lon * 0.15 + Math.cos(angle) * holdingRadius,
+        1.1 + Math.sin(angle * 2) * 0.05,
+        -holdWp.lat * 0.15 + Math.sin(angle) * (holdingRadius * 0.7)
       );
       forwardVec.set(-Math.sin(angle), 0, Math.cos(angle) * 0.7).normalize();
-      bankRoll = 0.35; // constant bank in orbit
+      bankRoll = 0.32; // constant bank in orbit
     } else {
       // Interpolate along waypoints
-      const idxFloat = flightProgress * (waypoints.length - 1);
+      const idxFloat = currentProg * (waypoints.length - 1);
       const idxA = Math.floor(idxFloat);
       const idxB = Math.min(waypoints.length - 1, idxA + 1);
       const alpha = idxFloat - idxA;
@@ -90,118 +109,141 @@ export const Airplane: React.FC<AirplaneProps> = ({ waypoints, signal }) => {
         THREE.MathUtils.lerp(zA, zB, alpha)
       );
 
-      forwardVec.set(xB - xA, yB - yA, zB - zA).normalize();
+      const dx = xB - xA;
+      const dy = yB - yA;
+      const dz = zB - zA;
+      const len = Math.sqrt(dx * dx + dy * dy + dz * dz);
+      if (len > 0.0001) {
+        forwardVec.set(dx / len, dy / len, dz / len);
+      }
 
       // Heading rate of change for realistic banking
-      const bearingDiff = (wpB.bearing_deg - wpA.bearing_deg);
-      const normalizedDiff = Math.atan2(Math.sin((bearingDiff * Math.PI) / 180), Math.cos((bearingDiff * Math.PI) / 180));
-      bankRoll = THREE.MathUtils.clamp(-normalizedDiff * 4.0, -0.42, 0.42); // Clamped ~24 deg
-
-      // Pitch based on climb / descent
-      pitchAngle = (yB - yA) * 2.5;
+      const bearingDiff = wpB.bearing_deg - wpA.bearing_deg;
+      const normalizedDiff = Math.atan2(
+        Math.sin((bearingDiff * Math.PI) / 180),
+        Math.cos((bearingDiff * Math.PI) / 180)
+      );
+      bankRoll = THREE.MathUtils.clamp(-normalizedDiff * 3.5, -0.42, 0.42);
+      pitchAngle = (yB - yA) * 2.2;
     }
 
     groupRef.current.position.copy(targetPos);
 
-    // Orientation: Look along forward vector with pitch and bank
-    const rotMatrix = new THREE.Matrix4();
-    const upVec = new THREE.Vector3(0, 1, 0);
-    rotMatrix.lookAt(new THREE.Vector3(0, 0, 0), forwardVec, upVec);
-    groupRef.current.quaternion.setFromRotationMatrix(rotMatrix);
+    // Orient aircraft along forward direction safely
+    const lookTarget = targetPos.clone().add(forwardVec);
+    groupRef.current.lookAt(lookTarget);
     groupRef.current.rotateZ(bankRoll);
     groupRef.current.rotateX(-pitchAngle);
 
-    // Update contrail
+    // Update contrail particles
     if (trailRef.current) {
       const positions = trailRef.current.geometry.attributes.position.array as Float32Array;
-      for (let i = trailCount - 1; i > 0; i--) {
-        positions[i * 3] = positions[(i - 1) * 3];
-        positions[i * 3 + 1] = positions[(i - 1) * 3 + 1];
-        positions[i * 3 + 2] = positions[(i - 1) * 3 + 2];
+
+      // Initialize all points to current position on first frame to prevent origin streaking
+      if (!trailInitialized.current) {
+        for (let i = 0; i < trailCount; i++) {
+          positions[i * 3] = targetPos.x;
+          positions[i * 3 + 1] = targetPos.y;
+          positions[i * 3 + 2] = targetPos.z;
+        }
+        trailInitialized.current = true;
+      } else {
+        // Shift trail history
+        for (let i = trailCount - 1; i > 0; i--) {
+          positions[i * 3] = positions[(i - 1) * 3];
+          positions[i * 3 + 1] = positions[(i - 1) * 3 + 1];
+          positions[i * 3 + 2] = positions[(i - 1) * 3 + 2];
+        }
+        positions[0] = targetPos.x;
+        positions[1] = targetPos.y;
+        positions[2] = targetPos.z;
       }
-      positions[0] = targetPos.x;
-      positions[1] = targetPos.y;
-      positions[2] = targetPos.z;
       trailRef.current.geometry.attributes.position.needsUpdate = true;
     }
   });
 
-  // Strobe light timing (<= 1Hz)
-  const strobeIntensity = Math.sin(Date.now() * 0.003) > 0.8 ? 2.5 : 0.0;
+  // Strobe light timing (<= 1Hz flash)
+  const strobeIntensity = Math.sin(Date.now() * 0.004) > 0.85 ? 2.5 : 0.0;
 
   return (
     <>
-      {/* Jet Aircraft Model */}
-      <group ref={groupRef} scale={[0.18, 0.18, 0.18]}>
-        {/* Fuselage */}
-        <mesh castShadow receiveShadow>
-          <cylinderGeometry args={[0.32, 0.28, 3.4, 16]} />
-          <meshStandardMaterial color="#E2E8F0" roughness={0.25} metalness={0.8} />
+      {/* Jet Aircraft Model - Oriented with nose pointing along -Z */}
+      <group ref={groupRef} scale={[0.16, 0.16, 0.16]}>
+        {/* Fuselage (aligned along Z axis: nose at -Z, tail at +Z) */}
+        <mesh position={[0, 0, 0]} rotation={[Math.PI / 2, 0, 0]} castShadow receiveShadow>
+          <cylinderGeometry args={[0.3, 0.26, 3.2, 16]} />
+          <meshStandardMaterial color="#E2E8F0" roughness={0.25} metalness={0.75} />
         </mesh>
 
-        {/* Nose Cone */}
-        <mesh position={[0, 1.9, 0]} castShadow>
-          <coneGeometry args={[0.32, 0.8, 16]} />
-          <meshStandardMaterial color="#0F172A" roughness={0.4} metalness={0.6} />
+        {/* Aerodynamic Nose Cone (at -Z) */}
+        <mesh position={[0, 0, -1.8]} rotation={[-Math.PI / 2, 0, 0]} castShadow>
+          <coneGeometry args={[0.3, 0.8, 16]} />
+          <meshStandardMaterial color="#0F172A" roughness={0.3} metalness={0.6} />
         </mesh>
 
-        {/* Swept Main Wings */}
-        <mesh position={[0, -0.2, 0]} rotation={[0, 0, Math.PI / 2]} castShadow>
-          <boxGeometry args={[0.06, 4.4, 0.75]} />
+        {/* Cockpit Windshield */}
+        <mesh position={[0, 0.22, -1.2]} rotation={[-0.35, 0, 0]}>
+          <boxGeometry args={[0.32, 0.12, 0.35]} />
+          <meshStandardMaterial color="#1E293B" roughness={0.1} metalness={0.9} />
+        </mesh>
+
+        {/* Swept Main Wings (spanning across X axis) */}
+        <mesh position={[0, -0.05, -0.2]} castShadow>
+          <boxGeometry args={[4.2, 0.05, 0.75]} />
           <meshStandardMaterial color="#CBD5E1" roughness={0.3} metalness={0.7} />
         </mesh>
 
-        {/* Winglets */}
-        <mesh position={[-2.2, -0.15, 0.1]} rotation={[0, 0, -0.3]}>
-          <boxGeometry args={[0.04, 0.35, 0.25]} />
-          <meshStandardMaterial color="#4DA3FF" />
+        {/* Left & Right Winglets */}
+        <mesh position={[-2.1, 0.14, -0.2]} rotation={[0, 0, -0.25]}>
+          <boxGeometry args={[0.04, 0.32, 0.22]} />
+          <meshStandardMaterial color="#3B82F6" roughness={0.4} />
         </mesh>
-        <mesh position={[2.2, -0.15, 0.1]} rotation={[0, 0, 0.3]}>
-          <boxGeometry args={[0.04, 0.35, 0.25]} />
-          <meshStandardMaterial color="#4DA3FF" />
-        </mesh>
-
-        {/* Twin Jet Engines */}
-        <mesh position={[-0.9, -0.4, 0.2]} rotation={[Math.PI / 2, 0, 0]}>
-          <cylinderGeometry args={[0.16, 0.15, 0.8, 12]} />
-          <meshStandardMaterial color="#334155" metalness={0.9} roughness={0.2} />
-        </mesh>
-        <mesh position={[0.9, -0.4, 0.2]} rotation={[Math.PI / 2, 0, 0]}>
-          <cylinderGeometry args={[0.16, 0.15, 0.8, 12]} />
-          <meshStandardMaterial color="#334155" metalness={0.9} roughness={0.2} />
+        <mesh position={[2.1, 0.14, -0.2]} rotation={[0, 0, 0.25]}>
+          <boxGeometry args={[0.04, 0.32, 0.22]} />
+          <meshStandardMaterial color="#3B82F6" roughness={0.4} />
         </mesh>
 
-        {/* Engine Exhaust Glow */}
-        <pointLight position={[-0.9, -0.4, -0.3]} color="#60A5FA" intensity={1.5} distance={1.2} />
-        <pointLight position={[0.9, -0.4, -0.3]} color="#60A5FA" intensity={1.5} distance={1.2} />
+        {/* Twin Jet Engines (mounted under wings along Z axis) */}
+        <mesh position={[-0.85, -0.26, -0.2]} rotation={[Math.PI / 2, 0, 0]}>
+          <cylinderGeometry args={[0.15, 0.14, 0.75, 12]} />
+          <meshStandardMaterial color="#334155" metalness={0.85} roughness={0.2} />
+        </mesh>
+        <mesh position={[0.85, -0.26, -0.2]} rotation={[Math.PI / 2, 0, 0]}>
+          <cylinderGeometry args={[0.15, 0.14, 0.75, 12]} />
+          <meshStandardMaterial color="#334155" metalness={0.85} roughness={0.2} />
+        </mesh>
 
-        {/* Vertical Tail Fin */}
-        <mesh position={[0, -1.3, 0.55]} rotation={[0.3, 0, 0]}>
-          <boxGeometry args={[0.05, 0.9, 0.5]} />
+        {/* Engine Exhaust Afterglow */}
+        <pointLight position={[-0.85, -0.26, 0.25]} color="#60A5FA" intensity={1.2} distance={1.0} />
+        <pointLight position={[0.85, -0.26, 0.25]} color="#60A5FA" intensity={1.2} distance={1.0} />
+
+        {/* Vertical Tail Fin (Swept back at tail +Z) */}
+        <mesh position={[0, 0.55, 1.3]} rotation={[0.4, 0, 0]}>
+          <boxGeometry args={[0.05, 0.85, 0.55]} />
           <meshStandardMaterial color="#2563EB" metalness={0.6} />
         </mesh>
 
-        {/* Horizontal Stabilizers */}
-        <mesh position={[0, -1.5, 0.2]} rotation={[0, 0, Math.PI / 2]}>
-          <boxGeometry args={[0.04, 1.4, 0.35]} />
+        {/* Horizontal Tail Stabilizers */}
+        <mesh position={[0, 0.15, 1.45]}>
+          <boxGeometry args={[1.35, 0.04, 0.35]} />
           <meshStandardMaterial color="#CBD5E1" metalness={0.7} />
         </mesh>
 
-        {/* Navigation Lights (Red Port, Green Starboard) */}
-        <mesh position={[-2.2, -0.15, 0]}>
-          <sphereGeometry args={[0.06, 8, 8]} />
+        {/* Navigation Wingtip Lights (Port = Red, Starboard = Green) */}
+        <mesh position={[-2.1, -0.05, -0.2]}>
+          <sphereGeometry args={[0.05, 8, 8]} />
           <meshBasicMaterial color="#EF4444" />
         </mesh>
-        <mesh position={[2.2, -0.15, 0]}>
-          <sphereGeometry args={[0.06, 8, 8]} />
+        <mesh position={[2.1, -0.05, -0.2]}>
+          <sphereGeometry args={[0.05, 8, 8]} />
           <meshBasicMaterial color="#10B981" />
         </mesh>
 
-        {/* Anti-collision White Strobe (<= 1Hz) */}
-        <pointLight position={[0, -1.6, 0.9]} color="#FFFFFF" intensity={strobeIntensity} distance={3} />
+        {/* Flashing Anti-Collision White Strobe */}
+        <pointLight position={[0, 1.05, 1.2]} color="#FFFFFF" intensity={strobeIntensity} distance={3.5} />
       </group>
 
-      {/* Jet Contrail Ribbon */}
+      {/* Contrail Vapor Trail */}
       <points ref={trailRef}>
         <bufferGeometry>
           <bufferAttribute
@@ -222,4 +264,3 @@ export const Airplane: React.FC<AirplaneProps> = ({ waypoints, signal }) => {
     </>
   );
 };
-

@@ -17,20 +17,27 @@ export function usePerfTier(): PerfTier {
       return;
     }
 
-    // 2. Measure FPS over 1 second sample
+    // 2. Measure FPS over sample window to set graphic fidelity tier
     let frameCount = 0;
     let startTime = performance.now();
     let animId: number;
 
     const measure = (time: number) => {
+      // If tab is in background, don't count throttled frames against fidelity
+      if (document.hidden) {
+        startTime = time;
+        frameCount = 0;
+        animId = requestAnimationFrame(measure);
+        return;
+      }
+
       frameCount++;
       const elapsed = time - startTime;
-      if (elapsed >= 1000) {
+      if (elapsed >= 1500) {
         const fps = (frameCount / elapsed) * 1000;
-        if (fps < 28) {
+        if (fps < 25) {
           setPerfTier("low");
-          setIs2DMode(true);
-        } else if (fps < 48) {
+        } else if (fps < 45) {
           setPerfTier("medium");
         } else {
           setPerfTier("high");
