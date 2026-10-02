@@ -20,8 +20,8 @@ export const FlightPath: React.FC<FlightPathProps> = ({ waypoints, signal }) => 
     for (const wp of waypoints) {
       const x = wp.lon * 0.15;
       const z = -wp.lat * 0.15;
-      const yAir = (wp.alt_ft / 35000.0) * 1.5;
-      const yGround = 0.02;
+      const yAir = Math.max(0.08, (wp.alt_ft / 35000.0) * 1.6);
+      const yGround = 0.03;
 
       air.push(new THREE.Vector3(x, yAir, z));
       ground.push(new THREE.Vector3(x, yGround, z));
@@ -43,29 +43,39 @@ export const FlightPath: React.FC<FlightPathProps> = ({ waypoints, signal }) => 
   if (!airCurve || !groundCurve) return null;
 
   // Signal-linked path color
-  let pathColor = "#4DA3FF";
-  if (signal === "BUY NOW") pathColor = "#2DD4A7";
-  else if (signal === "WAIT / PRICE HIGH") pathColor = "#F26D6D";
-  else if (signal === "CONSIDER WAITING") pathColor = "#F5B84B";
+  let pathColor = "#38BDF8";
+  if (signal === "BUY NOW") pathColor = "#10B981";
+  else if (signal === "WAIT / PRICE HIGH") pathColor = "#EF4444";
+  else if (signal === "CONSIDER WAITING") pathColor = "#F59E0B";
 
   return (
     <group>
-      {/* 3D Flight Arc in Air */}
+      {/* 3D Flight Arc in Air (Solid Core) */}
       <mesh>
-        <tubeGeometry args={[airCurve, 128, 0.025, 8, false]} />
-        <meshBasicMaterial color={pathColor} transparent opacity={0.8} />
+        <tubeGeometry args={[airCurve, 128, 0.045, 8, false]} />
+        <meshStandardMaterial
+          color={pathColor}
+          emissive={pathColor}
+          emissiveIntensity={0.6}
+          roughness={0.2}
+        />
       </mesh>
 
-      {/* Subtle outer glow on air arc */}
+      {/* Atmospheric Luminous Outer Glow Ribbon */}
       <mesh>
-        <tubeGeometry args={[airCurve, 128, 0.05, 8, false]} />
-        <meshBasicMaterial color={pathColor} transparent opacity={0.2} blending={THREE.AdditiveBlending} />
+        <tubeGeometry args={[airCurve, 128, 0.09, 8, false]} />
+        <meshBasicMaterial
+          color={pathColor}
+          transparent
+          opacity={0.22}
+          blending={THREE.AdditiveBlending}
+        />
       </mesh>
 
-      {/* Ground Projection Line */}
+      {/* Ground Projection Shadow Ribbon */}
       <mesh>
-        <tubeGeometry args={[groundCurve, 128, 0.015, 6, false]} />
-        <meshBasicMaterial color="#334155" transparent opacity={0.5} />
+        <tubeGeometry args={[groundCurve, 128, 0.02, 6, false]} />
+        <meshBasicMaterial color="#1E293B" transparent opacity={0.6} />
       </mesh>
     </group>
   );

@@ -12,7 +12,6 @@ interface CameraRigProps {
 
 export const CameraRig: React.FC<CameraRigProps> = ({ waypoints }) => {
   const controlsRef = useRef<OrbitControlsImpl>(null);
-  const flightPhase = useAppStore((state) => state.flightPhase);
   const flightProgress = useAppStore((state) => state.flightProgress);
   const reducedMotion = useAppStore((state) => state.reducedMotion);
   const { camera } = useThree();
@@ -21,21 +20,22 @@ export const CameraRig: React.FC<CameraRigProps> = ({ waypoints }) => {
   const idleTimer = useRef<number | null>(null);
 
   // Compute flight center for target
-  const targetLook = useRef(new THREE.Vector3(11.5, 0.4, -3.2));
+  const targetLook = useRef(new THREE.Vector3(11.5, 0.4, -3.0));
 
   // Initialize camera and target when route changes
   useEffect(() => {
-    if (waypoints.length > 0) {
+    if (waypoints.length > 0 && controlsRef.current) {
       const mid = waypoints[Math.floor(waypoints.length / 2)];
-      const midPos = new THREE.Vector3(mid.lon * 0.15, 0.4, -mid.lat * 0.15);
+      const midPos = new THREE.Vector3(mid.lon * 0.15, 0.5, -mid.lat * 0.15);
       targetLook.current.copy(midPos);
 
-      if (controlsRef.current) {
-        controlsRef.current.target.copy(midPos);
-        controlsRef.current.update();
-      }
+      // Set target to route center
+      controlsRef.current.target.copy(midPos);
+      camera.position.set(midPos.x, midPos.y + 6.5, midPos.z + 5.5);
+      camera.lookAt(midPos);
+      controlsRef.current.update();
     }
-  }, [waypoints]);
+  }, [waypoints, camera]);
 
   useFrame((_, delta) => {
     if (reducedMotion || isUserInteracting.current || !controlsRef.current) return;
@@ -51,36 +51,9 @@ export const CameraRig: React.FC<CameraRigProps> = ({ waypoints }) => {
         -currWp.lat * 0.15
       );
 
-      let targetCamPos = new THREE.Vector3(planePos.x + 3.0, planePos.y + 2.2, planePos.z + 2.5);
-
-      switch (flightPhase) {
-        case "takeoff":
-        case "climb":
-          targetCamPos.set(planePos.x - 1.8, planePos.y + 1.2, planePos.z + 2.2);
-          targetLook.current.lerp(planePos, clampedDelta * 3.0);
-          break;
-        case "holding":
-          targetCamPos.set(planePos.x + 2.2, 4.2, planePos.z + 3.0);
-          targetLook.current.lerp(planePos, clampedDelta * 2.0);
-          break;
-        case "approach":
-        case "descent":
-        case "landed": {
-          const destWp = waypoints[waypoints.length - 1];
-          const destPos = new THREE.Vector3(destWp.lon * 0.15, 0.2, -destWp.lat * 0.15);
-          targetCamPos.set(destPos.x + 2.0, 3.2, destPos.z + 3.8);
-          targetLook.current.lerp(destPos, clampedDelta * 2.2);
-          break;
-        }
-        case "cruise":
-        default:
-          targetCamPos.set(planePos.x + 3.0, planePos.y + 2.2, planePos.z + 2.5);
-          targetLook.current.lerp(planePos, clampedDelta * 2.5);
-          break;
-      }
-
-      camera.position.lerp(targetCamPos, clampedDelta * 1.6);
-      controlsRef.current.target.lerp(targetLook.current, clampedDelta * 2.4);
+      // Smoothly update target towards the aircraft
+      targetLook.current.lerp(planePos, clampedDelta * 2.2);
+      controlsRef.current.target.copy(targetLook.current);
       controlsRef.current.update();
     }
   });
@@ -88,10 +61,11 @@ export const CameraRig: React.FC<CameraRigProps> = ({ waypoints }) => {
   return (
     <OrbitControls
       ref={controlsRef}
+      target={[11.5, 0.4, -3.0]}
       enableDamping
       dampingFactor={0.06}
       maxPolarAngle={Math.PI / 2.15}
-      minDistance={2.0}
+      minDistance={1.8}
       maxDistance={25}
       onStart={() => {
         isUserInteracting.current = true;
@@ -101,7 +75,7 @@ export const CameraRig: React.FC<CameraRigProps> = ({ waypoints }) => {
         if (idleTimer.current) clearTimeout(idleTimer.current);
         idleTimer.current = window.setTimeout(() => {
           isUserInteracting.current = false;
-        }, 3500);
+        }, 4000);
       }}
     />
   );

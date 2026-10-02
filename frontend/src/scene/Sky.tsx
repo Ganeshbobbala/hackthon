@@ -7,34 +7,34 @@ export const Sky: React.FC = () => {
   const config = {
     day: {
       ambient: "#38BDF8",
-      ambientInt: 0.7,
+      ambientInt: 0.85,
       sun: "#FFFBEB",
-      sunInt: 1.8,
+      sunInt: 2.0,
       sunPos: [15, 20, 10] as [number, number, number],
-      fog: "#0B1528",
+      fog: "#070E1B",
     },
     dusk: {
       ambient: "#7C3AED",
-      ambientInt: 0.5,
+      ambientInt: 0.65,
       sun: "#F97316",
-      sunInt: 1.5,
+      sunInt: 1.6,
       sunPos: [15, 6, -15] as [number, number, number],
-      fog: "#1E112A",
+      fog: "#150B1E",
     },
     night: {
-      ambient: "#1E293B",
-      ambientInt: 0.35,
+      ambient: "#3B82F6",
+      ambientInt: 0.5,
       sun: "#93C5FD",
-      sunInt: 0.6,
+      sunInt: 0.8,
       sunPos: [10, 15, -10] as [number, number, number],
-      fog: "#050811",
+      fog: "#03060E",
     },
   }[timeOfDay];
 
   return (
     <>
       <color attach="background" args={[config.fog]} />
-      <fog attach="fog" args={[config.fog, 10, 35]} />
+      <fog attach="fog" args={[config.fog, 20, 75]} />
 
       {/* Atmospheric Ambient Light */}
       <ambientLight color={config.ambient} intensity={config.ambientInt} />
