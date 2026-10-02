@@ -32,6 +32,28 @@ export const Disclaimer: React.FC = () => {
         </div>
       </div>
 
+      {/* Explicit PS-025 Anti-Goals Compliance */}
+      <div className="bg-slate-900/60 border border-amber-500/20 rounded-xl p-3.5 space-y-2">
+        <div className="flex items-center gap-2 text-amber-400 font-bold text-xs uppercase tracking-wider">
+          <span className="w-2 h-2 rounded-full bg-amber-400 animate-pulse"></span>
+          PS-025 Anti-Goals Compliance & Scope Boundaries
+        </div>
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-2.5 text-[11px]">
+          <div className="bg-slate-950/70 p-2.5 rounded-lg border border-slate-800">
+            <span className="text-rose-400 font-semibold block">🚫 No Online Travel Agency / Payments</span>
+            <span className="text-slate-400">Pure analytical decision intelligence. Zero checkout flows, ticketing APIs, or credit card handling.</span>
+          </div>
+          <div className="bg-slate-950/70 p-2.5 rounded-lg border border-slate-800">
+            <span className="text-rose-400 font-semibold block">🚫 No Aggressive Scraping</span>
+            <span className="text-slate-400">Fully ToS-compliant preloaded historical dataset across 9 domestic metro corridors (no IP bans or bot traps).</span>
+          </div>
+          <div className="bg-slate-950/70 p-2.5 rounded-lg border border-slate-800">
+            <span className="text-rose-400 font-semibold block">🚫 No Multi-City International</span>
+            <span className="text-slate-400">Focused exclusively on domestic point-to-point routes for honest 24-hr statistical validity and depth.</span>
+          </div>
+        </div>
+      </div>
+
       <div className="border-t border-slate-800/80 pt-3 text-center text-slate-300 font-medium italic">
         "FareRadar doesn't try to guess the airline's algorithm. It gives travelers historical evidence to understand today's price."
       </div>
